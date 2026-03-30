@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import json
 import logging
 import os
@@ -388,6 +389,7 @@ async def _run_extraction(
     fetch_all: bool,
     mark_read: bool,
     prompt_logger: PromptLogger,
+    fresh_start: bool = False,
 ) -> int:
     """Run one extraction cycle: fetch, deduplicate, extract, save.
 
@@ -396,6 +398,9 @@ async def _run_extraction(
         fetch_all: If True, fetch all emails; otherwise unread only.
         mark_read: If True, mark processed emails as read after extraction.
         prompt_logger: PromptLogger for this run.
+        fresh_start: If True, ignore any existing output file and start from
+            an empty list. Used for --all mode so re-runs don't accumulate
+            duplicates from previous runs.
 
     Returns:
         Number of emails processed.
@@ -406,7 +411,7 @@ async def _run_extraction(
     )
 
     gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
-    all_results = _load_existing_results(output_path)
+    all_results = [] if fresh_start else _load_existing_results(output_path)
 
     async with stdio_client(server_params) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
@@ -467,8 +472,6 @@ def _parse_args() -> argparse.Namespace:
 
 async def _main() -> None:
     """Main async entry point."""
-    import asyncio  # noqa: F401 — imported here to keep top-level imports clean
-
     args = _parse_args()
     _ensure_output_dir(args.output)
 
@@ -483,12 +486,13 @@ async def _main() -> None:
 
     try:
         if args.all_emails:
-            # Bulk run: all emails, do not mark as read
+            # Bulk run: all emails, do not mark as read, always overwrite output
             await _run_extraction(
                 output_path=args.output,
                 fetch_all=True,
                 mark_read=False,
                 prompt_logger=prompt_logger,
+                fresh_start=True,
             )
 
         elif args.once:
@@ -507,14 +511,19 @@ async def _main() -> None:
                 config.POLL_INTERVAL_SECONDS,
             )
             while True:
-                await _run_extraction(
-                    output_path=args.output,
-                    fetch_all=False,
-                    mark_read=True,
-                    prompt_logger=prompt_logger,
-                )
+                try:
+                    await _run_extraction(
+                        output_path=args.output,
+                        fetch_all=False,
+                        mark_read=True,
+                        prompt_logger=prompt_logger,
+                    )
+                except Exception as error:
+                    # Log the error but keep polling — transient failures (503,
+                    # network blip, MCP hiccup) should not kill the process
+                    logger.error("Extraction cycle failed, will retry next poll: %s", error)
                 logger.info("Sleeping %d seconds.", config.POLL_INTERVAL_SECONDS)
-                time.sleep(config.POLL_INTERVAL_SECONDS)
+                await asyncio.sleep(config.POLL_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user.")

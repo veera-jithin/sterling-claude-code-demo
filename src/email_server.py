@@ -75,27 +75,29 @@ def _simplify_email(email: dict[str, Any]) -> dict[str, Any]:
 def _decode_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
     """Decode attachment content based on its type.
 
-    Images are kept as base64. PDFs are noted but not decoded. All other
-    types are decoded as UTF-8 text where possible.
+    Images and PDFs are kept as raw base64 so the caller can pass them
+    directly to Gemini as inline data parts. All other types are decoded
+    as UTF-8 text where possible.
 
     Args:
         attachment: Raw attachment dict from the Graph API.
 
     Returns:
-        Attachment dict with a decoded 'content' field added.
+        Attachment dict with name, contentType, and content fields.
+        For PDFs and images, content is the raw base64 string from Graph API.
+        For text attachments, content is the decoded UTF-8 string.
     """
     content_type: str = attachment.get("contentType", "").lower()
     raw_bytes: str = attachment.get("contentBytes", "")
 
-    if content_type.startswith("image/"):
-        content = f"[image/base64] {raw_bytes}"
-    elif content_type == "application/pdf":
-        content = "[PDF attachment — content not decoded]"
+    if content_type.startswith("image/") or content_type == "application/pdf":
+        # Keep as base64 — caller is responsible for passing to Gemini as inline data
+        content = raw_bytes
     else:
         try:
             content = base64.b64decode(raw_bytes).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
-            content = f"[binary attachment — could not decode as text]"
+            content = "[binary attachment — could not decode as text]"
 
     return {
         "name": attachment.get("name", ""),
@@ -105,31 +107,69 @@ def _decode_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Thread deduplication
+# ---------------------------------------------------------------------------
+
+def _deduplicate_by_thread(emails: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only the most recent email per conversation thread.
+
+    Emails are expected newest-first from the Graph API, so the first occurrence
+    of each conversationId is the one to keep. Emails without a conversationId
+    are treated as standalone and always kept.
+
+    Args:
+        emails: Simplified email dicts, ordered newest first.
+
+    Returns:
+        Deduplicated list with at most one email per conversationId.
+    """
+    seen: set[str] = set()
+    deduplicated: list[dict[str, Any]] = []
+    for email in emails:
+        conversation_id = email.get("conversationId", "")
+        if not conversation_id or conversation_id not in seen:
+            deduplicated.append(email)
+            if conversation_id:
+                seen.add(conversation_id)
+    logger.info(
+        "Deduplicated %d emails to %d unique threads.",
+        len(emails), len(deduplicated),
+    )
+    return deduplicated
+
+
+# ---------------------------------------------------------------------------
 # MCP tools
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
 def list_unread_emails() -> list[dict[str, Any]]:
-    """Fetch all unread emails from the inbox.
+    """Fetch unread emails from the inbox, deduplicated by conversation thread.
+
+    Returns one email per thread — the most recent message. Emails without a
+    conversationId are always included.
 
     Returns:
-        List of simplified email dicts, ordered newest first.
+        Deduplicated list of simplified email dicts, ordered newest first.
     """
     logger.info("Tool called: list_unread_emails")
     emails = _graph.fetch_unread_emails()
-    return [_simplify_email(e) for e in emails]
+    return _deduplicate_by_thread([_simplify_email(e) for e in emails])
 
 
 @mcp.tool()
 def list_all_emails() -> list[dict[str, Any]]:
-    """Fetch all emails (read and unread) from the inbox.
+    """Fetch all emails (read and unread) from the inbox, deduplicated by conversation thread.
+
+    Returns one email per thread — the most recent message. Emails without a
+    conversationId are always included.
 
     Returns:
-        List of simplified email dicts, ordered newest first.
+        Deduplicated list of simplified email dicts, ordered newest first.
     """
     logger.info("Tool called: list_all_emails")
     emails = _graph.fetch_all_emails()
-    return [_simplify_email(e) for e in emails]
+    return _deduplicate_by_thread([_simplify_email(e) for e in emails])
 
 
 @mcp.tool()

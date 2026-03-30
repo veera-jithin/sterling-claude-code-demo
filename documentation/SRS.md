@@ -2,7 +2,7 @@
 
 ## Email Job Extraction Agent
 
-**Version:** 1.1
+**Version:** 1.3
 **Date:** 2026-03-30
 **Project:** EAI Internship Demo — Sterling Demo
 
@@ -16,7 +16,7 @@ This document describes the software requirements for an automated email job ext
 
 ### 1.2 Scope
 
-The system connects to a Microsoft 365 mailbox via the Microsoft Graph API, exposes email access as MCP (Model Context Protocol) tools, and runs one Gemini API call per email to extract structured JSON job records.
+The system connects to a Microsoft 365 mailbox via the Microsoft Graph API, exposes email access as MCP (Model Context Protocol) tools, and runs an agentic Gemini session per extraction cycle. Gemini autonomously decides which MCP tools to call (fetching emails, retrieving threads, checking attachments) and extracts structured JSON job records via function calling.
 
 ### 1.3 Intended Users
 
@@ -44,14 +44,21 @@ Microsoft 365 Mailbox
    └── mark_email_read
         │  stdio (MCP protocol)
         ▼
-     main.py (MCP client + per-email loop)
-        │  one Gemini call per email
+     main.py (MCP client + agentic loop)
+        │
+        │  MCP tools exposed as Gemini FunctionDeclarations
+        │  Gemini drives all tool calls autonomously
         │  Google AI API
         ▼
   Gemini 2.5 Pro (`gemini-2.5-pro`)
+   ├── calls list_unread_emails / list_all_emails
+   ├── calls get_email_thread when conversationId present
+   ├── calls get_email_attachments when hasAttachments is true
+   ├── calls mark_email_read after processing (polling mode)
+   └── calls extract_jobs → structured JSON per job order
         │
         ▼
-  results.json (updated after each email)
+  results.json (updated after each extract_jobs call)
 ```
 
 ---
@@ -71,17 +78,17 @@ Microsoft 365 Mailbox
 
 ### 3.2 Thread Deduplication
 
-| ID    | Requirement                                                                                                |
-| ----- | ---------------------------------------------------------------------------------------------------------- |
-| FR-07 | System shall group emails by `conversationId` before processing                                          |
-| FR-08 | For each conversation thread, system shall process only the most recent email                              |
-| FR-09 | Older emails within the same thread shall be skipped — their content is quoted inline in the latest reply |
+| ID    | Requirement                                                                                                                                                                  |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-07 | `list_unread_emails` and `list_all_emails` shall deduplicate results by `conversationId` before returning them, keeping only the most recent email per thread             |
+| FR-08 | Deduplication shall be applied server-side in `email_server.py` so that Gemini always receives a flat, already-deduplicated list with no redundant thread comparisons needed |
+| FR-09 | Emails without a `conversationId` shall be treated as standalone and always included                                                                                        |
 
 ### 3.3 Job Extraction
 
 | ID     | Requirement                                                                                                                                                                             |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-10  | System shall process emails sequentially — one Gemini API call per email, not batched or parallelised                                                                                  |
+| FR-10  | System shall run one agentic Gemini session per extraction cycle; Gemini autonomously calls MCP tools to fetch, thread, and inspect emails before calling `extract_jobs` |
 | FR-11  | System shall extract the following fields from each job order email:`builder_name`, `community`, `type_of_job`, `address`, `lot`, `block`                                   |
 | FR-12  | System shall return multiple job objects if a single email contains multiple jobs                                                                                                       |
 | FR-13  | System shall skip emails that contain no job information (return `[]`)                                                                                                                |
@@ -227,7 +234,8 @@ The Azure app must be configured as follows for authentication to work:
 
 - FastMCP server exposing 6 email tools over stdio
 - Simplifies email payloads via `_simplify_email()` — passes full body without truncation
-- Handles attachment content decoding (images as base64, PDFs noted, others UTF-8)
+- Deduplicates results in `list_unread_emails` and `list_all_emails` by `conversationId`, returning only the most recent email per thread
+- Handles attachment content decoding: images as base64, PDFs returned as raw base64 for inline upload to Gemini, others decoded as UTF-8
 - Runs as a subprocess launched by `main.py`
 
 ### 6.3 `extractor.py` — HTML Processor
@@ -238,9 +246,11 @@ The Azure app must be configured as follows for authentication to work:
 
 ### 6.4 `main.py` — Agent Orchestrator
 
-- Fetches emails via MCP, deduplicates by conversation thread
-- Runs one Gemini API call per email with function-calling loop
-- Saves results incrementally to output file after each email
+- Launches `email_server.py` as a subprocess and opens an MCP `ClientSession`
+- Exposes all MCP tools to Gemini as `FunctionDeclaration` objects
+- Runs an agentic tool-use loop: Gemini calls MCP tools autonomously (fetch, thread, attachments, mark read) until it has enough data, then calls `extract_jobs`
+- Thread deduplication is handled via system prompt instruction rather than hardcoded code
+- Saves results incrementally to the output file after each `extract_jobs` call
 - Manages prompt logging
 
 ---
@@ -279,7 +289,7 @@ The Azure app must be configured as follows for authentication to work:
 - **Microsoft refresh tokens** expire after ~90 days of inactivity; requires re-running `python graph.py --login`
 - **Personal MSA accounts** require `consumers` authority and do not support `$filter` + `$orderby` combined on Graph API
 - **Graph API returns max 25 emails** per call in current configuration
-- **Attachment handling**: images passed as base64, PDFs are noted but not decoded/parsed
+- **Attachment handling**: images passed as base64, PDFs are uploaded directly to Gemini as inline binary data (`application/pdf` mime type) — Gemini reads the PDF natively, no text extraction step required
 - **Thread deduplication** is based on `conversationId` — emails without a conversationId are treated as standalone
 - **Auth Code Flow requires port 8400 to be free** during login — if another process occupies the port, `python graph.py --login` will fail
 - **Device Code Flow is not used** — the app is registered as a confidential client (has a secret), so `PublicClientApplication` and device code flow are not appropriate; Auth Code Flow with `ConfidentialClientApplication` is used instead

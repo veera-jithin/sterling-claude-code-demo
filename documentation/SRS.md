@@ -149,12 +149,33 @@ Microsoft 365 Mailbox
 
 ### 4.3 Authentication
 
-| ID     | Requirement                                                                           |
-| ------ | ------------------------------------------------------------------------------------- |
-| NFR-07 | System shall use OAuth 2.0 Authorization Code Flow for Microsoft Graph authentication |
-| NFR-08 | Refresh tokens shall be cached locally and reused automatically (~90 day validity)    |
-| NFR-09 | One-time browser login shall be triggered via `python graph.py --login`             |
-| NFR-10 | Gemini shall be accessed via Google AI API using a static API key                     |
+| ID     | Requirement                                                                                                  |
+| ------ | ------------------------------------------------------------------------------------------------------------ |
+| NFR-07 | System shall use OAuth 2.0 Authorization Code Flow for Microsoft Graph authentication                        |
+| NFR-08 | Refresh tokens shall be cached locally and reused automatically (~90 day validity)                           |
+| NFR-09 | One-time browser login shall be triggered via `python graph.py --login`                                    |
+| NFR-10 | Gemini shall be accessed via Google AI API using a static API key                                            |
+| NFR-11 | System shall use `ConfidentialClientApplication` (MSAL) — not `PublicClientApplication` — because the Azure app has a client secret registered |
+| NFR-12 | System shall use Authorization Code Flow with a local redirect server on `http://localhost:8400` to capture the OAuth callback |
+| NFR-13 | `http://localhost:8400` must be registered as a redirect URI in the Azure app registration (Authentication → Web platform) |
+
+### 4.4 Azure App Registration Setup
+
+The Azure app must be configured as follows for authentication to work:
+
+**App type:** Confidential client (Web application) — do **not** enable "Allow public client flows"
+
+**Required redirect URI:**
+- Platform: **Web**
+- URI: `http://localhost:8400`
+
+**Required API permissions (Delegated):**
+- `Mail.ReadWrite` — read and mark emails as read
+
+**Why this matters:**
+- The app has a client secret, making it a confidential client. Confidential clients use Authorization Code Flow, not Device Code Flow.
+- Device Code Flow (`initiate_device_flow`) only works with `PublicClientApplication` and requires "Allow public client flows" to be enabled — loosening the security model unnecessarily.
+- Auth Code Flow with a local redirect server is the correct, secure pattern: it opens the browser, the user logs in, Azure redirects to `http://localhost:8400` with the auth code, and the local server captures it to exchange for tokens.
 
 ---
 
@@ -171,6 +192,7 @@ Microsoft 365 Mailbox
   "lot": "string | null",
   "block": "string | null",
   "confidence": "high | medium | low",
+  "confidence_reason": "string",
   "source_email_subject": "string"
 }
 ```
@@ -259,3 +281,5 @@ Microsoft 365 Mailbox
 - **Graph API returns max 25 emails** per call in current configuration
 - **Attachment handling**: images passed as base64, PDFs are noted but not decoded/parsed
 - **Thread deduplication** is based on `conversationId` — emails without a conversationId are treated as standalone
+- **Auth Code Flow requires port 8400 to be free** during login — if another process occupies the port, `python graph.py --login` will fail
+- **Device Code Flow is not used** — the app is registered as a confidential client (has a secret), so `PublicClientApplication` and device code flow are not appropriate; Auth Code Flow with `ConfidentialClientApplication` is used instead

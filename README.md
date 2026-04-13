@@ -114,6 +114,13 @@ python src/main.py --all
 
 # Custom output path (default: res/results.json)
 python src/main.py --all --output res/results.json
+
+# Launch with web UI for real-time review and approval
+python src/main.py --ui
+
+# Combine UI with other modes
+python src/main.py --ui --all
+python src/main.py --ui --once
 ```
 
 ---
@@ -122,6 +129,29 @@ python src/main.py --all --output res/results.json
 
 - **`res/results.json`** — extracted job orders, written incrementally after each email (partial runs are never lost)
 - **`res/logs/<timestamp>_<mode>.log`** — full prompt log for each run: system prompt, every Gemini response, all tool calls and their results
+- **`res/jobs.db`** — SQLite database for approved jobs (created when using `--ui` flag)
+
+---
+
+## Web UI
+
+Launch the web interface for real-time job review and approval:
+
+```bash
+python src/main.py --ui
+```
+
+Access at: **http://localhost:5000**
+
+### Features:
+- **Real-time email monitoring** — see emails as they're processed
+- **Live job extraction** — extracted jobs appear immediately without page refresh
+- **Edit & approve workflow** — review, edit fields, add notes, and approve to database
+- **Search & filter** — find approved jobs by builder, community, or address
+- **Audit trail** — tracks all field edits with timestamp and editor notes
+- **WebSocket updates** — all changes broadcast instantly to connected clients
+
+See [UI_USAGE.md](documentation/UI_USAGE.md) for detailed usage guide.
 
 ---
 
@@ -129,17 +159,36 @@ python src/main.py --all --output res/results.json
 
 ```
 src/
-  main.py          # CLI entry point + agentic Gemini loop
+  main.py          # CLI entry point + agentic Gemini loop + web UI launcher
   email_server.py  # FastMCP server exposing email tools over stdio
   graph.py         # Microsoft Graph API client (OAuth 2.0)
   extractor.py     # HTML email body cleaner (strips CSS, preserves tables)
   config.py        # All configuration and .env loading
+  web_server.py    # Flask + SocketIO server for web UI
+  database.py      # SQLite persistence layer for jobs and edit history
+
+  static/          # Web UI frontend
+    index.html     # Main UI layout
+    app.js         # JavaScript for WebSocket and DOM updates
+    style.css      # UI styling
+
+  tests/           # Test suite
+    test_smoke.py              # Smoke tests
+    test_extractor.py          # Unit tests for HTML extractor
+    test_graph.py              # Unit tests for Graph API client
+    test_database.py           # Unit tests for database operations
+    test_email_server.py       # Unit tests for MCP email tools
+    test_web_server.py         # Unit tests for web server endpoints
+    test_integration_graph.py  # Integration tests for Graph API
+    test_integration_extraction.py  # Integration tests for Gemini extraction
 
 documentation/
   SRS.md           # Software Requirements Specification
   TESTING.md       # Test documentation
+  UI_USAGE.md      # Web UI usage guide
 
 res/               # Runtime output (gitignored)
   results.json
+  jobs.db
   logs/
 ```

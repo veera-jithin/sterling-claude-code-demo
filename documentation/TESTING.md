@@ -7,6 +7,8 @@ after functionality has been verified working end-to-end. All tests live in
 `src/tests/`. Unit tests mock all external calls; no real network requests are
 made unless running integration tests.
 
+**Current test coverage:** 65 tests across smoke, unit, and integration levels.
+
 ---
 
 ## Test Types
@@ -15,9 +17,9 @@ made unless running integration tests.
 Confirm that all modules import cleanly and core objects can be instantiated.
 No assertions on logic — just validates basic wiring. Runs in under 1 second.
 
-### Unit Tests (`test_extractor.py`, `test_graph.py`)
+### Unit Tests (`test_extractor.py`, `test_graph.py`, `test_database.py`, `test_email_server.py`, `test_web_server.py`)
 Test individual classes and methods in isolation. All external calls (HTTP,
-MSAL) are mocked using `pytest-mock` and `unittest.mock`.
+MSAL, file I/O) are mocked using `pytest-mock` and `unittest.mock`.
 
 - **`test_extractor.py`**: Tests every behaviour of `HtmlExtractor` — noise
   removal, table HTML preservation, block-to-newline conversion, list item
@@ -25,6 +27,12 @@ MSAL) are mocked using `pytest-mock` and `unittest.mock`.
 - **`test_graph.py`**: Tests `GraphClient` fetch/filter/mark-read logic, auth
   header construction, error propagation on non-2xx responses, and both auth
   providers (`HardcodedTokenAuthProvider`, mock of `DelegatedAuthProvider`).
+- **`test_database.py`**: Tests database CRUD operations for pending and approved
+  jobs, edit history tracking, search/filter functionality, and constraint validation.
+- **`test_email_server.py`**: Tests MCP email tool implementations including
+  list emails, get thread, get attachments, mark as read, and thread deduplication.
+- **`test_web_server.py`**: Tests Flask REST endpoints, WebSocket event broadcasting,
+  job approval workflow, and request validation.
 
 ### Integration Tests (`test_integration_graph.py`, `test_integration_extraction.py`)
 Test real interactions with external services using live credentials.
@@ -45,6 +53,9 @@ Test real interactions with external services using live credentials.
 | `test_smoke.py` | Smoke | All module imports, basic instantiation | No external calls |
 | `test_extractor.py` | Unit | `HtmlExtractor` — HTML stripping, table preservation, whitespace | No dependencies |
 | `test_graph.py` | Unit | `GraphClient` — fetch, filter, mark-read, auth, error handling | Mocks `requests.get/patch` |
+| `test_database.py` | Unit | Database CRUD, edit history, search/filter, constraints | Uses in-memory SQLite |
+| `test_email_server.py` | Unit | MCP email tools, thread deduplication, attachments | Mocks Graph API client |
+| `test_web_server.py` | Unit | Flask endpoints, WebSocket events, approval workflow | Mocks database layer |
 | `test_integration_graph.py` | Integration | Real Graph API — fetch, thread ordering, attachments | Requires `.token_cache.json` |
 | `test_integration_extraction.py` | Integration | Real Gemini API — schema, field accuracy, multi-job, empty result | Requires `GEMINI_API_KEY` |
 
@@ -75,8 +86,11 @@ pytest src/tests/test_extractor.py -v
 
 ## Known Gaps / TODO
 
-- **`email_server.py` unit tests** — MCP tool wiring not yet tested in isolation
-- **`main.py` unit tests** — extraction loop, thread deduplication logic, and
-  incremental save behaviour not yet covered
-- **Gemini 503 retry logic** — the extractor currently returns `[]` on 503;
-  a retry with backoff should be added and tested
+- **`main.py` unit tests** — Extraction loop orchestration, CLI argument parsing,
+  and mode switching logic not yet covered
+- **Web UI frontend tests** — JavaScript WebSocket handling and DOM manipulation
+  not yet tested (currently manual testing only)
+- **Gemini 503 retry logic** — The extractor currently returns `[]` on 503;
+  a retry with exponential backoff should be added and tested
+- **Integration test for full workflow** — End-to-end test covering email fetch →
+  extraction → web UI broadcast → database save not yet implemented

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Job Extraction Agent</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header>
+        <h1>Email Job Extraction Agent</h1>
+        <div class="status-bar">
+            <span class="status-indicator" id="connection-status">
+                <span class="dot" id="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </span>
+            <span class="stats">
+                <span>Processed: <strong id="processed-count">0</strong></span>
+                <span>Pending: <strong id="pending-count">0</strong></span>
+                <span>Approved: <strong id="approved-count">0</strong></span>
+            </span>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Top Section: Pending Jobs List -->
+        <section class="panel pending-jobs-panel">
+            <h2>Pending Jobs</h2>
+            <div id="job-list-content" class="job-list-horizontal">
+                <div class="placeholder">
+                    <p>No pending jobs</p>
+                    <p class="hint">Jobs will appear here as they are extracted</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bottom Section: Expanded Job Detail (Hidden by default) -->
+        <section id="job-detail-section" class="job-detail-section hidden">
+            <div class="detail-section-header">
+                <h2>Job Details</h2>
+                <button id="btn-collapse" class="btn btn-secondary">✕ Close</button>
+            </div>
+            <div class="detail-grid">
+                <!-- Left: Source Email -->
+                <div class="detail-panel">
+                    <h3>Source Email</h3>
+                    <div id="email-content" class="detail-content">
+                        <div class="placeholder">Select a job to view email</div>
+                    </div>
+                </div>
+
+                <!-- Right: Extracted Job Data -->
+                <div class="detail-panel">
+                    <h3>Extracted Job Data</h3>
+                    <div id="job-content" class="detail-content">
+                        <div class="placeholder">Select a job to view extraction</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Bottom Section: Approved Jobs Database -->
+    <section class="database-section">
+        <div class="database-header">
+            <h2>Approved Jobs Database</h2>
+            <div class="search-controls">
+                <input type="text" id="search-builder" placeholder="Search by builder...">
+                <input type="text" id="search-community" placeholder="Search by community...">
+                <input type="text" id="search-address" placeholder="Search by address...">
+                <button id="btn-search" class="btn btn-primary">Search</button>
+                <button id="btn-refresh" class="btn btn-secondary">Refresh</button>
+            </div>
+        </div>
+        <div id="database-content" class="database-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Builder</th>
+                        <th>Community</th>
+                        <th>Address</th>
+                        <th>Lot</th>
+                        <th>Block</th>
+                        <th>Job Type</th>
+                        <th>Confidence</th>
+                        <th>Approved At</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody id="database-tbody">
+                    <tr class="placeholder-row">
+                        <td colspan="10">No approved jobs yet</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Attachment Viewer Modal -->
+    <div id="attachment-modal" class="modal hidden">
+        <div class="modal-content attachment-modal-content">
+            <div class="modal-header">
+                <h3 id="attachment-title">Attachment</h3>
+                <button class="close-btn" id="close-attachment-modal">&times;</button>
+            </div>
+            <div class="modal-body attachment-viewer">
+                <iframe id="attachment-frame" style="width: 100%; height: 70vh; border: none;"></iframe>
+            </div>
+            <div class="modal-footer">
+                <a id="attachment-download" href="#" download class="btn btn-primary">Download</a>
+                <button id="btn-close-viewer" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Job Details</h3>
+                <button class="close-btn" id="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Builder Name:</label>
+                    <input type="text" id="edit-builder" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Community:</label>
+                    <input type="text" id="edit-community" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Address:</label>
+                    <input type="text" id="edit-address" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Lot:</label>
+                    <input type="text" id="edit-lot" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Block:</label>
+                    <input type="text" id="edit-block" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Job Type:</label>
+                    <input type="text" id="edit-job-type" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Editor's Notes: <span class="required">*</span></label>
+                    <textarea id="edit-notes" class="form-control" rows="3" placeholder="Explain what changes were made and why..." required></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-cancel-edit" class="btn btn-secondary">Cancel</button>
+                <button id="btn-save-edit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <script src="/app.js"></script>
+</body>
+</html>

@@ -11,39 +11,35 @@ Follow these guidelines in all code written or modified.
 project-root/
 ├── CLAUDE.md                  # project rules (this file) — stays at root
 ├── README.md                  # repo readme — stays at root
-├── requirements.txt           # pinned dependencies — stays at root
-├── pytest.ini                 # pytest config — stays at root
+├── requirements.txt           # pinned dependencies (Python) — stays at root
+├── pytest.ini                 # test framework config — stays at root
 ├── .env                       # secrets — never committed
 ├── .env.example               # secrets template — committed
 ├── .gitignore
 │
 ├── src/                       # all application source code
-│   ├── config.py
-│   ├── graph.py
-│   ├── email_server.py
-│   ├── extractor.py
-│   ├── main.py
+│   ├── config.py              # configuration loader
+│   ├── <module>.py            # application modules
 │   └── tests/                 # all tests live inside src/
-│       ├── conftest.py        # adds src/ to sys.path
-│       ├── test_smoke.py
-│       ├── test_extractor.py
-│       └── test_graph.py
+│       ├── conftest.py        # test configuration (adds src/ to sys.path)
+│       ├── test_smoke.py      # smoke tests
+│       └── test_<module>.py   # unit/integration tests
 │
-├── res/                       # runtime output and logs (gitignored)
-│   ├── results.json
-│   └── logs/
+├── output/                    # runtime output and logs (gitignored)
+│   ├── data/                  # generated data files
+│   └── logs/                  # application logs
 │
 └── documentation/             # all project docs except CLAUDE.md and README.md
-    ├── SRS.md
-    └── TESTING.md
+    ├── SRS.md                 # software requirements specification
+    └── TESTING.md             # testing documentation
 ```
 
 Rules:
-* All Python source files go in `src/` — never in root
+* All source files go in `src/` — never in root
 * All tests go in `src/tests/` — never alongside source files or in root
 * All `.md` docs go in `documentation/` — except `CLAUDE.md` and `README.md` which stay at root
-* All runtime output (results, logs) goes in `res/` — this directory is gitignored
-* `res/` is created at runtime if it doesn't exist — never committed
+* All runtime output (results, logs, generated data) goes in a gitignored output directory
+* Output directory is created at runtime if it doesn't exist — never committed
 
 ---
 
@@ -63,8 +59,8 @@ Rules:
 * Use **type hints** on all function signatures
 * Max line length: **100 characters**
 * Use `snake_case` for variables and functions, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants
-* Name functions as verbs: `fetch_user()`, `parse_response()`, `send_email()`
-* Name booleans as predicates: `is_valid`, `has_attachments`, `was_processed`
+* Name functions as verbs: `fetch_data()`, `parse_response()`, `process_item()`
+* Name booleans as predicates: `is_valid`, `has_children`, `was_processed`
 * Avoid abbreviations unless they are universally understood (`url`, `id`, `csv` are fine; `proc`, `tmp`, `val` are not)
 
 ---
@@ -112,7 +108,21 @@ Rules:
 * Provide a `.env.example` with all required keys and placeholder values, committed to git
 * Example pattern:
   ```python
-  # config.pyfrom dotenv import load_dotenvimport osload_dotenv()# Secrets — loaded from .envANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")GRAPH_CLIENT_SECRET: str = os.getenv("GRAPH_CLIENT_SECRET")# Configurable values — defaults defined here, overridable via .envPOLL_INTERVAL_SECONDS: int = int(os.getenv("POLL_INTERVAL_SECONDS", 60))MAX_THREAD_LENGTH: int = int(os.getenv("MAX_THREAD_LENGTH", 10))LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+  # config.py
+  from dotenv import load_dotenv
+  import os
+
+  load_dotenv()
+
+  # Secrets — loaded from .env
+  API_KEY: str = os.getenv("API_KEY")
+  DATABASE_URL: str = os.getenv("DATABASE_URL")
+  SECRET_TOKEN: str = os.getenv("SECRET_TOKEN")
+
+  # Configurable values — defaults defined here, overridable via .env
+  POLL_INTERVAL_SECONDS: int = int(os.getenv("POLL_INTERVAL_SECONDS", 60))
+  MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", 3))
+  LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
   ```
 
 ---
@@ -122,7 +132,9 @@ Rules:
 * **Always use a virtual environment** — never install packages into the global Python environment
 * Create and activate venv before doing anything else:
   ```bash
-  python -m venv venvsource venv/bin/activate        # Mac/Linuxvenv\Scripts\activate           # Windows
+  python -m venv venv
+  source venv/bin/activate        # Mac/Linux
+  venv\Scripts\activate           # Windows
   ```
 * The `venv/` directory must be in `.gitignore` — never commit it
 
@@ -131,17 +143,21 @@ Rules:
 * **Pin exact versions** for all dependencies in `requirements.txt` — use `==` not `>=`
 * Every time a new package is installed, immediately update `requirements.txt`:
   ```bash
-  pip install some-packagepip freeze > requirements.txt   # always do this after every install
+  pip install some-package
+  pip freeze > requirements.txt   # always do this after every install
   ```
 * `requirements.txt` is always committed to git and kept up to date — it is the source of truth for the environment
 * To recreate the environment from scratch:
   ```bash
-  python -m venv venvsource venv/bin/activatepip install -r requirements.txt
+  python -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
   ```
 * Don't add a library for something that's easy to implement in stdlib
 * If adding a new dependency, add a comment in `requirements.txt` above it explaining why it's needed:
   ```
-  # OCR for image-based email attachmentspytesseract==0.3.10
+  # HTTP client for external API calls
+  requests==2.31.0
   ```
 
 ---
@@ -152,7 +168,7 @@ Rules:
 * Once verified, write tests at three levels in order:
   * **Smoke tests** — does the thing run without crashing? Minimal assertions, just confirms basic wiring
   * **Unit tests** — test individual functions/methods in isolation with mocked dependencies
-  * **Integration tests** — test real interactions between components (e.g. extractor + real Claude API call, graph client + real mailbox)
+  * **Integration tests** — test real interactions between components (e.g. API client + real service, database layer + real database)
 * Test file naming: `test_<module>.py`; integration tests: `test_integration_<feature>.py`
 * Each test should test one thing and have a descriptive name: `test_returns_null_when_field_missing`
 * Mock all external calls (APIs, DB) in unit tests — unit tests must not make real network requests
@@ -167,15 +183,26 @@ Rules:
 * Every public function and method must have a **function-level docstring** covering: what it does, its parameters (`Args:`), return value (`Returns:`), and exceptions it may raise (`Raises:`)
 * Use Google-style docstrings consistently:
   ```python
-  def fetch_emails(since: datetime) -> list[Email]:    """Fetch unread emails from the monitored mailbox since a given datetime.    Args:        since: Only return emails received after this timestamp.    Returns:        A list of Email objects ordered oldest-first.    Raises:        GraphAPIError: If the Graph API request fails or returns a non-2xx status.    """
+  def fetch_records(since: datetime) -> list[Record]:
+      """Fetch records from the data source since a given datetime.
+
+      Args:
+          since: Only return records created after this timestamp.
+
+      Returns:
+          A list of Record objects ordered by creation time.
+
+      Raises:
+          APIError: If the API request fails or returns a non-2xx status.
+      """
   ```
-* Don't leave TODO comments without a name and date: `# TODO(jithin 2026-03-30): refactor after API confirmed`
+* Don't leave TODO comments without a name and date: `# TODO(name YYYY-MM-DD): description of what needs to be done`
 
 ---
 
 ## Git Hygiene
 
-* Commit messages: imperative mood, present tense — `Add supplier normalization logic` not `Added...`
+* Commit messages: imperative mood, present tense — `Add data validation logic` not `Added...`
 * One logical change per commit
 * Never commit `.env`, secrets, or local IDE config files
 * Branch naming: `feature/`, `fix/`, `chore/` prefixes
@@ -244,9 +271,9 @@ and how to run them.
 
 | File | Type | What it tests | Notes |
 |---|---|---|---|
-| test_extractor.py | Unit | Order extraction logic | Mocks Claude API |
-| test_graph.py | Unit | Graph API client | Mocks HTTP layer |
-| test_integration_extraction.py | Integration | Real Claude API extraction | Requires ANTHROPIC_API_KEY |
+| test_parser.py | Unit | Data parsing logic | Mocks external dependencies |
+| test_api_client.py | Unit | API client module | Mocks HTTP layer |
+| test_integration_workflow.py | Integration | End-to-end workflow | Requires API_KEY in .env |
 
 ## Running Tests
 

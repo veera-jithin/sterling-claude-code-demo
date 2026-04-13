@@ -25,7 +25,7 @@ MICROSOFT_GRAPH_TOKEN: str = os.getenv("MICROSOFT_GRAPH_TOKEN", "")
 
 # --- Configurable values (overridable via .env) ---
 
-POLL_INTERVAL_SECONDS: int = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+POLL_INTERVAL_SECONDS: int = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))
 MAX_THREAD_LENGTH: int = int(os.getenv("MAX_THREAD_LENGTH", "10"))
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 

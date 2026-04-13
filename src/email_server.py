@@ -41,12 +41,14 @@ def _simplify_email(email: dict[str, Any]) -> dict[str, Any]:
 
     Preserves the full body — never truncates. HTML bodies are cleaned via
     HtmlExtractor to reduce token count while keeping table structure intact.
+    Also stores the original HTML for UI display.
 
     Args:
         email: Raw email dict from the Graph API.
 
     Returns:
-        Simplified dict with only the fields needed for extraction.
+        Simplified dict with only the fields needed for extraction, plus
+        originalBodyHtml for UI rendering and attachment names.
     """
     body_content: str = ""
     body_obj = email.get("body", {})
@@ -60,8 +62,18 @@ def _simplify_email(email: dict[str, Any]) -> dict[str, Any]:
 
     sender = email.get("from", {}).get("emailAddress", {})
 
+    # Fetch attachment names if email has attachments
+    attachment_names: list[str] = []
+    email_id = email.get("id", "")
+    if email.get("hasAttachments", False) and email_id:
+        try:
+            attachments = _graph.fetch_attachments(email_id)
+            attachment_names = [att.get("name", "unknown") for att in attachments]
+        except Exception as e:
+            logger.warning("Failed to fetch attachment names for email %s: %s", email_id, e)
+
     return {
-        "id": email.get("id", ""),
+        "id": email_id,
         "subject": email.get("subject", ""),
         "from": sender.get("address", ""),
         "receivedDateTime": email.get("receivedDateTime", ""),
@@ -69,6 +81,9 @@ def _simplify_email(email: dict[str, Any]) -> dict[str, Any]:
         "hasAttachments": email.get("hasAttachments", False),
         "conversationId": email.get("conversationId", ""),
         "body": body_content,
+        "bodyContentType": content_type,
+        "originalBodyHtml": raw_content if content_type == "html" else None,
+        "attachmentNames": attachment_names if attachment_names else None,
     }
 
 

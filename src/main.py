@@ -21,8 +21,9 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from google import genai
 from google.genai import types
@@ -36,6 +37,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# WebSocket broadcasting support (optional, only when --ui flag is used)
+_broadcast_callback: Optional[Any] = None
 
 # ---------------------------------------------------------------------------
 # Gemini system prompt
@@ -449,6 +453,7 @@ async def _run_agentic_loop(
         types.Content(role="user", parts=[types.Part(text=user_message)])
     ]
     jobs_extracted = 0
+    current_email: Optional[dict[str, Any]] = None  # Track email being processed
 
     while True:
         try:
@@ -494,6 +499,25 @@ async def _run_agentic_loop(
                 _save_results(output_path, all_results)
                 jobs_extracted += len(jobs)
                 logger.info("Extracted %d job(s) via extract_jobs.", len(jobs))
+
+                # Save to pending_jobs database and broadcast to UI
+                if _broadcast_callback and jobs:
+                    try:
+                        from database import JobDatabase
+                        db = JobDatabase()
+                        for job in jobs:
+                            # Save to pending_jobs table
+                            pending_id = db.save_pending_job(job, current_email or {})
+                            logger.info("Saved pending job %d to database.", pending_id)
+                            # Broadcast with pending_id
+                            _broadcast_callback("job_extracted", {
+                                "job": job,
+                                "email": current_email,
+                                "pending_id": pending_id
+                            })
+                    except Exception as error:
+                        logger.error("Failed to save pending job to database: %s", error)
+
                 result_payload: dict[str, Any] = {"status": "ok", "jobs_saved": len(jobs)}
             else:
                 try:
@@ -501,6 +525,26 @@ async def _run_agentic_loop(
                         session, fc.name, dict(fc.args), prompt_logger
                     )
                     result_payload = {"result": result_str}
+
+                    # Track current email and broadcast email processing events to UI
+                    if fc.name in ("get_email_thread", "list_unread_emails", "list_all_emails"):
+                        try:
+                            parsed = json.loads(result_str)
+                            if isinstance(parsed, dict) and "subject" in parsed:
+                                current_email = parsed
+                                if _broadcast_callback:
+                                    _broadcast_callback("email_processing", {"email": parsed})
+                            elif isinstance(parsed, list) and parsed:
+                                # For list results, use the first email with a subject
+                                for email in parsed:
+                                    if isinstance(email, dict) and "subject" in email:
+                                        current_email = email
+                                        if _broadcast_callback:
+                                            _broadcast_callback("email_processing", {"email": email})
+                                        break
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+
                 except Exception as error:
                     logger.error("MCP tool %s failed: %s", fc.name, error)
                     result_payload = {"error": str(error)}
@@ -579,7 +623,7 @@ def _parse_args() -> argparse.Namespace:
     """Parse CLI arguments.
 
     Returns:
-        Parsed Namespace with output, all, and once flags.
+        Parsed Namespace with output, all, once, and ui flags.
     """
     parser = argparse.ArgumentParser(
         description="Extract job orders from Outlook emails using Gemini."
@@ -596,11 +640,16 @@ def _parse_args() -> argparse.Namespace:
         "--once", action="store_true",
         help="Process unread emails once, then exit.",
     )
+    parser.add_argument(
+        "--ui", action="store_true",
+        help="Start web UI server for real-time monitoring and job approval.",
+    )
     return parser.parse_args()
 
 
 async def _main() -> None:
     """Main async entry point."""
+    global _broadcast_callback
     args = _parse_args()
     _ensure_output_dir(args.output)
 
@@ -610,6 +659,27 @@ async def _main() -> None:
         mode = "once"
     else:
         mode = "polling"
+
+    # Start web server in background thread if --ui flag is set
+    if args.ui:
+        try:
+            import web_server
+            from web_server import create_app, broadcast_extraction_event
+
+            flask_app, socketio_instance = create_app()
+            web_server.socketio = socketio_instance  # Set the global socketio
+            _broadcast_callback = broadcast_extraction_event
+
+            def run_flask():
+                logger.info("Starting web UI on http://0.0.0.0:8080")
+                socketio_instance.run(flask_app, host="0.0.0.0", port=8080, allow_unsafe_werkzeug=True)
+
+            flask_thread = threading.Thread(target=run_flask, daemon=True)
+            flask_thread.start()
+            logger.info("Web UI started. Access it at http://localhost:8080")
+        except ImportError as error:
+            logger.error("Failed to start web UI: %s", error)
+            logger.error("Install dependencies: pip install flask flask-socketio flask-cors")
 
     prompt_logger = PromptLogger(mode)
 
